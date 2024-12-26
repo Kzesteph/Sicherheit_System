@@ -1,23 +1,17 @@
 /*
  * decoder_engine.h
  *
- *  Created on: 4 juin 2020
- *      Author: Kaze
+ *  Created on: 27 mai 2020
+ *      Author: michel_granda
  */
 
 #ifndef DECODER_ENGINE_H_
 #define DECODER_ENGINE_H_
 
 #include "hal_port.h"
-#include "hal_usart.h"
-#include "function.h"
+#include "NMEA_sentence.h"
 
-
-#define CTRL_Z  0x1A
-#define _BUF_SIZE 50
-
-unsigned char my_buffer[_BUF_SIZE];
-unsigned char _index[3];
+volatile GNRMC_sentence GNRMC_var;
 
 
 
@@ -43,13 +37,6 @@ typedef enum{
 	checksum_ok = 1
 
 }checksum_status;
-
-typedef enum{
-
-	index_error = 0,
-	index_valid
-
-}index_status;
 
 
 
@@ -93,23 +80,21 @@ inline static unsigned char reception_trame(volatile uint8_t *recv_reg, unsigned
 
 }
 
-
 /**
  *
  * @param _tab
  * @param entete
- * @return
  */
-inline unsigned char  get_entete(unsigned char *_tab, volatile const unsigned char *entete, unsigned char len){
+inline unsigned char  get_entete(unsigned char *_tab, char *entete){
 
-unsigned char _size = 0 , i = 0;
+unsigned int _size = 0 , i = 0;
 unsigned char error = 1;
 
-	_size = len; //strlen(entete);
+	_size = strlen(entete);
 
 	for(i=0; i < _size; i++){
 
-		if( _tab[i] != pgm_read_byte( &entete[i] ) ){ //pgm_read_byte( &entete[i] )
+		if( _tab[i] != entete[i] ){
 
 			error = 0;
 
@@ -124,77 +109,97 @@ unsigned char error = 1;
 }
 
 
+/**
+ *
+ * @param _tab
+ * @return
+ */
+inline unsigned char get_checksum(unsigned char *_tab){
+
+unsigned char checksum_in_trame = 0;
+unsigned char checksum_cal = 0;
+unsigned char i = 0, buf[3];
+
+	checksum_cal =0;
+
+	for(i=0; _tab[i+1] != '*'; i++ ){
+
+			checksum_cal ^= _tab[i+1];
+	}
+
+ /// on recupere le checksum a la fin de la trame
+ ///
+	buf[0] = _tab[i+2];
+	buf[1] = _tab[i+3];
+	buf[2] = 0;
+
+
+
+	checksum_in_trame = (unsigned char)( strtol(buf,0,16) );
+
+
+	///comparaison du cheksum
+
+	if(checksum_cal == checksum_in_trame){
+
+		return checksum_ok;
+	}
+	else{
+
+		return checksum_error;
+	}
+
+
+}
 
 /**
  *
  * @param _tab
- * @param buffer
+ * @param _tab_resultat
+ * @param _delemiter
  * @return
  */
-inline unsigned char get_index(unsigned char *_tab, unsigned char *buffer){
+unsigned char string_recupere(unsigned char *_tab, unsigned char *_tab_resultat,  unsigned char _delemiter, unsigned char _position);
 
-	unsigned char i = 0;
-	unsigned char error_status = 0;
+/**
+ *
+ * @param _tab
+ * @param pt
+ * @return
+ */
+inline GNRMC_sentence decode_NMEA_GNRMC_sentence(unsigned char *_tab){
 
-	buffer[0] = 0;
-	buffer[1] = 0;
-	buffer[2] = 0;
+GNRMC_sentence nmea;
 
-	while( _tab[12 + i++] != '\r' ){
-
-		if(i < 3){
-
-			buffer[i-1] = _tab[12 + i-1];
-
-			error_status = 1;
-		}
-		else{
-
-			buffer[0] = 0;
-			buffer[1] = 0;
-			buffer[2] = 0;
-
-			error_status = 0;
-			break;
-		}
-
-	}
-
-	i = 0;
-
-	return error_status;
-}
+	string_recupere(_tab, nmea.entete,        ',', 0);
+	string_recupere(_tab, nmea.time_utc,      ',', 1);
+	string_recupere(_tab, nmea.status,        ',', 2);
+	string_recupere(_tab, nmea.latitude, 	  ',', 3);
+	string_recupere(_tab, nmea.hemisphere_NS, ',', 4);
+	string_recupere(_tab, nmea.longitude,     ',', 5);
+	string_recupere(_tab, nmea.hemisphere_EW, ',', 6);
+	string_recupere(_tab, nmea.speed,         ',', 7);
+	string_recupere(_tab, nmea.cog,           ',', 8);
+	string_recupere(_tab, nmea.date,          ',', 9);
 
 
-inline unsigned char string_to_decimal(unsigned char *pt){
-
-unsigned char number=0;
-
-	if( (pt[1] == 0) && (pt[0] >= 0x30) && (pt[0] <= 0x39) ){
-
-
-		return pt[0] - 48;
-
-	}
-	else if( (pt[0] >= 0x30) && (pt[0] <= 0x39) && (pt[1] >= 0x30) && (pt[1] <= 0x39) ){
-
-		number = ( (pt[0] - 48) * 10 ) + (pt[1] - 48);
-
-		return number;
-
-	}
-	else{
-
-		return 0;
-	}
+	return nmea;
 
 }
 
-/************************************************************************/
-/*                                                                      */
-/************************************************************************/
+/**
+ *
+ * @param _buf
+ * @param len
+ */
 
-inline void copy_char(unsigned char *_tab_recv, unsigned char *_tab_send, unsigned char len){
+void flush_buffer(unsigned char *_buf, unsigned int len);
+
+
+/*
+
+*/
+inline void copy_data(unsigned char *_tab_recv, unsigned char *_tab_send, unsigned char len){
 
 	unsigned char i =0;
 
@@ -205,41 +210,4 @@ inline void copy_char(unsigned char *_tab_recv, unsigned char *_tab_send, unsign
 
 }
 
-
-/************************************************************************/
-/*                                                                      */
-/************************************************************************/
-
- 
-inline void save_phone_number(unsigned char *number){
-	
-	uint8_t i = 0;
-	
-	for(i=0; i<9; i++){
-		
-		eeprom_update_byte( (uint8_t *) i, number[i] );
-	}
-	
-	
-	
-}
- 
-
-/************************************************************************/
-/*                                                                      */
-/************************************************************************/
-
- 
-inline void get_number_phone(volatile unsigned char *number){
-	
-	uint8_t i = 0;
-		
-	for(i=0; i<9; i++){
-			
-		number[i] = eeprom_read_byte( (const uint8_t *) i);
-	}
-		
-	
-}
- 
 #endif /* DECODER_ENGINE_H_ */

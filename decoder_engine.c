@@ -1,79 +1,80 @@
 /*
  * decoder_engine.c
  *
- *  Created on: 4 juin 2020
- *      Author: Kaze
+ *  Created on: 27 mai 2020
+ *      Author: michel_granda
  */
 
 #include "decoder_engine.h"
+#include "hal_usart.h"
+
+#define _BUF_SIZE  90
+
+unsigned char buffer_recv[_BUF_SIZE];
 
 
-
- volatile const unsigned char CMTI[] PROGMEM= "+CMTI:";
- volatile const unsigned char GPSM[] PROGMEM= "+GPSM:";
- volatile const unsigned char CMGR[] PROGMEM= "AT+CMGR=";
- volatile const unsigned char NUMB[] PROGMEM= "+NUMB="; // exemple +NUMB=697544991
- volatile const unsigned char CRLF[] PROGMEM= "\r\n";
- volatile const unsigned char CMGD[] PROGMEM= "AT+CMGD=";
- volatile const unsigned char CMGS2[] PROGMEM= "AT+CMGS=\"";
- volatile const unsigned char RECU[] PROGMEM= " est enregistré comme numero du proprietaire";
-
-  extern volatile unsigned char number_phone[10];
- 
- unsigned char index_lue;
- unsigned char sms_index[3];
 
 ISR(USART_RX_vect){
 
-		switch( reception_trame(&UDR,my_buffer,'\n',_BUF_SIZE) ){
 
-			case _buffer_full:
 
-				flush_buffer(my_buffer, _BUF_SIZE);
+	switch( reception_trame(&UDR0,buffer_recv,'\n',_BUF_SIZE) ){ /// on enregistre chaque octect
 
-				break;
 
-			case _end_recv:
+		case _buffer_full:
 
-//***************************
-				switch( get_entete(my_buffer,CMTI,6) ){///verification de l'entete lors de la reception d'un message
+			flush_buffer(buffer_recv, _BUF_SIZE);
+
+			break;
+
+		case _end_recv:  /// lorsque la trame a ete recue correctement on passe a la verification de l'entete
+
+				switch( get_entete(buffer_recv,"$GPRMC") ){///verification de l'entete
 
 					case entete_match:
 
-						switch( get_index(my_buffer, _index) ){
+						if (get_checksum(buffer_recv) == checksum_ok){
 
-							case index_valid: //ici c'est quand l'index est valid
-								
-								copy_char(sms_index, _index,3);
-								
-								usart_write_text_const(CMGR, 0);
-								usart_write_text(_index, 0);
-								usart_write_text_const(CRLF,0); /// on lit le message en donnant l'emplacement du message
+							///lorsqu'on est ici c'est que l,entete correspond et que le message est bien arrivÃ© sans erreur
 
-								
+							GNRMC_var = decode_NMEA_GNRMC_sentence(buffer_recv);
 
-								break;
+							/*
+							usart_write_text(GNRMC_var.entete, 7);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.time_utc,11);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.status,2);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.latitude,9);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.hemisphere_NS,2);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.longitude,10);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.hemisphere_EW,0);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.speed,0);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.cog,0);
+							usart_write_text("-",1);
+							usart_write_text(GNRMC_var.date,0);
+							usart_write_text("\n",1);
+							usart_write_text(buffer_recv, _BUF_SIZE);*/
 
-							case index_error:
-
-								flush_buffer(_index, 3);
-
-								break;
-
-
-							default:
-
-								break;
+							flush_buffer(buffer_recv, _BUF_SIZE);
 
 						}
-
-						flush_buffer(my_buffer, _BUF_SIZE);
+						else{
+							
+							flush_buffer(buffer_recv, _BUF_SIZE);
+						}
 
 						break;
 
 					case entete_error:
 
-
+						flush_buffer(buffer_recv, _BUF_SIZE);
 
 						break;
 
@@ -81,146 +82,278 @@ ISR(USART_RX_vect){
 
 						break;
 
-				}/// fin de test de reception de +CMTI
+				}
+
+			break;
 
 
-///***********************
-
-				switch( get_entete(my_buffer,GPSM, 6) ){///debut test de reception de +GPSM: "MG",00CRLF
+		case _recv_continue:
 
 
-					case entete_match:
+			break;
 
-						switch( get_index(my_buffer, _index) ){
+		default:
 
-						case index_valid:
+			break;
 
- 
-							// debut de l'effacement du message
-							
-							usart_write_text_const(CMGD, 0);
-							usart_write_text(sms_index, 0);
-							usart_write_text_const(CRLF,0);
-							
-							//fin de l'effacement du message
-				 
-							
-							/// ici on envoie le code function a realiser
-							function_write( string_to_decimal(_index) );
-							gsm_request();
-
-							
-							flush_buffer(sms_index, 0x03);
+	}
 
 
-							break;
-
-						case index_error:
-
-							flush_buffer(_index, 3);
-
-							break;
+}
 
 
-						default:
+/**
+ *
+ * @param _buf
+ * @param len
+ */
+void flush_buffer(unsigned char *_buf, unsigned int len){
 
-							break;
+	unsigned int i = 0;
 
+	for(i=0; i<len; i++){
 
-						}
-
-
-						flush_buffer(my_buffer, _BUF_SIZE);
-
-						break;
-
-						case entete_error:
-
-
-							break;
+		_buf[i] = 0;
+	}
+}
 
 
-						default:
+/**
+ *
+ * @param _tab
+ * @param _delemiter
+ */
+unsigned char string_recupere(unsigned char *_tab, unsigned char *_tab_resultat,  unsigned char _delemiter, unsigned char _position){
+
+unsigned char buf[12] = {'0','0','0','0','0','0','0','0','0','0','0',0};
+unsigned char delimiter_pos[20]={0,0,0,0,0,0};
+unsigned char tampon[80];
+unsigned char *pt;
+unsigned char i=0, index=0, max_element=0;
+
+	flush_buffer(tampon,80);
+
+	strcpy(tampon,_tab);
+
+	while(tampon[i++] != '\0'){
+
+			if( (tampon[i] == _delemiter)  || (tampon[i] == '*') ){
 
 
-							break;
+				delimiter_pos[1+index++] = i;
 
-				}///fin de reception de +GPSM:
+			}
 
+	}
 
-//*****************************************
-				switch ( get_entete(my_buffer,NUMB, 6)){//debut de reception de +NUMB= pour la reception du numero de telephone
+	max_element = index + 1;
 
-					case entete_match:
-
-						save_phone_number( my_buffer + 6 );//enregistrement du numero de telephone ou le module enverra le message
-						copy_char(number_phone, my_buffer+6, 9); //on sauvegarde le numero
- 
-						// on envoie le message de reponse
-						
-						usart_write_text_const(CMGS2,0);
-						usart_write_text(number_phone,9);
-						usart_write_text("\"\r",0);
-						_delay_ms(1000); //temporisation tres importante
-					
-						usart_write_text(number_phone,9);					
-						usart_write_text_const(RECU,0);
-						_delay_ms(300);
-						usart_write(CTRL_Z);  // on tape CTRL+Z pour envoyer le message	
-						_delay_ms(1000);
-						// fin d'envoie du sms
+	i = 0;
+	index = 0;
 
 
-						// debut de l'effacement du message
-							
-						usart_write_text_const(CMGD, 0);
-						usart_write_text(sms_index, 0);
-						usart_write_text_const(CRLF,0);
-							
-						//fin de l'effacement du message
-							
-						flush_buffer(sms_index, 0x03);
-						flush_buffer(my_buffer, _BUF_SIZE);
- 
-						break;
+	switch(_position){
 
-					case entete_error:
+	case 0: ///entete
+
+		tampon[ delimiter_pos[_position + 1] ] = 0;
+		strcpy(_tab_resultat,tampon);
+
+		break;
 
 
-						break;
+	case 1: ///time utc
 
-					default:
+		tampon[ delimiter_pos[_position + 1] ] = 0;
+		strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
 
-						break;
-
-				}///fin de reception de +NUMB:
-
-//***********************************************
-
-				flush_buffer(my_buffer, _BUF_SIZE);
-
-				break;
+		break;
 
 
-			case _recv_continue:
+	case 2: /// status
 
-				
+		tampon[ delimiter_pos[_position + 1] ] = 0;
+		strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
 
-				break;
+		break;
 
+	case 3: //latitude
 
-			default:
+			pt = (tampon + delimiter_pos[_position] + 1);
 
+		if( *pt == _delemiter){
 
-				break;
-
+			strcpy(_tab_resultat, buf ); // on remplie les 0
+		}
+		else{
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
 		}
 
+		break;
+
+
+	case 4://hemisphere nord sud
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, "0" );
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+	case 5://longitude
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			//strcpy(_tab_resultat, "0" ); // on remplie les 0
+			copy_data(_tab_resultat,buf,10);
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+
+	case 6://hemisphere ouest est
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, "0" );
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+
+	case 7://speed
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, buf );
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+
+	case 8://cog
+
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, "0" );
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+
+	case 9: //date
+
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, "000000" );
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+	case 10:
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, "0" );
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+	case 11:
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, "0");
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+
+	case 12:
+
+		pt = (tampon + delimiter_pos[_position] + 1);
+
+		if( *pt == _delemiter){
+
+			strcpy(_tab_resultat, "0" );
+		}
+		else{
+
+			tampon[ delimiter_pos[_position + 1] ] = 0;
+			strcpy(_tab_resultat, (tampon + delimiter_pos[_position] + 1) );
+		}
+
+		break;
+
+
+	default:
+
+		break;
+
+
+	}
 
 
 
-
-
-
-
+	return 1;
 }

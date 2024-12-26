@@ -2,22 +2,24 @@
  * hal_port.h
  *
  *  Created on: 25 mai 2020
- *      Author: Kaze
+ *      Author: michel_granda
  */
 
 #ifndef HAL_PORT_H_
 #define HAL_PORT_H_
-
 #define F_CPU 16000000UL
+
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
-#include <avr/interrupt.h>
+#include <string.h>
 #include <avr/pgmspace.h>
+#include <avr/interrupt.h>
 #include <avr/eeprom.h>
+#include <util/twi.h>
+
 
 
 typedef enum{
@@ -103,7 +105,11 @@ inline unsigned char pin_toggle(volatile uint8_t *port, pin pin_number){
 
 inline unsigned char pin_read(volatile uint8_t *port, pin pin_number){
 
-	if ( *port & (1 << pin_number) ){
+unsigned char val=0;
+
+	val = *port;
+
+	if ( (val & (1 << pin_number) ) != 0 ){
 
 		return 0x01;
 	}
@@ -112,8 +118,10 @@ inline unsigned char pin_read(volatile uint8_t *port, pin pin_number){
 		return 0x00;
 	}
 
-}
 
+
+
+}
 
 //****************************************operation sur les ports ***********************************************
 
@@ -134,17 +142,6 @@ inline unsigned char port_read(volatile uint8_t *port){
 
 
 
-}
-
-
-inline void flush_buffer(unsigned char *_buf, unsigned int len){
-
-	unsigned int i = 0;
-
-	for(i=0; i<len; i++){
-
-		_buf[i] = 0;
-	}
 }
 
 #endif /* HAL_PORT_H_ */

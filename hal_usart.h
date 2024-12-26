@@ -2,7 +2,7 @@
  * hal_usart.h
  *
  *  Created on: 25 mai 2020
- *      Author: Kaze
+ *      Author: michel_granda
  */
 
 #ifndef HAL_USART_H_
@@ -40,8 +40,6 @@ void usart_write(unsigned char _data);
 
 void usart_write_text(unsigned char *text, unsigned int len);
 
-void usart_write_text_const(volatile const unsigned char *text, unsigned int len);
-
 //******************* read operation for usart *******************************************
 
 unsigned char usart_data_ready(void);
@@ -57,11 +55,11 @@ inline void usart_receive_interruption(activation  _state){
 
 	if(_state == enable){
 
-		pin_write(&UCSRB,RXCIE,high);
+		pin_write(&UCSR0B,RXCIE0,high);
 	}
 	else{
 
-		pin_write(&UCSRB,RXCIE,low);
+		pin_write(&UCSR0B,RXCIE0,low);
 	}
 
 }
